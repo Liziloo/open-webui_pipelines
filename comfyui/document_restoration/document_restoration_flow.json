@@ -10,9 +10,9 @@
   },
   "2": {
     "inputs": {
-      "threshold": 0.1,
+      "threshold": 0.2,
       "image": [
-        "17",
+        "26",
         0
       ]
     },
@@ -23,7 +23,7 @@
   },
   "3": {
     "inputs": {
-      "blur_radius": 20,
+      "blur_radius": 15,
       "sigma": 1,
       "image": [
         "16",
@@ -142,11 +142,11 @@
   "18": {
     "inputs": {
       "image_a": [
-        "17",
+        "26",
         0
       ],
       "image_b": [
-        "2",
+        "24",
         0
       ],
       "boolean": [
@@ -190,7 +190,7 @@
     "inputs": {
       "filename_prefix": "ComfyUI",
       "images": [
-        "24",
+        "18",
         0
       ]
     },
@@ -202,13 +202,57 @@
   "24": {
     "inputs": {
       "image": [
-        "18",
+        "2",
         0
       ]
     },
     "class_type": "ImageInvert",
     "_meta": {
       "title": "Invert Image"
+    }
+  },
+  "25": {
+    "inputs": {
+      "diameter": 7,
+      "sigma_color": 15,
+      "sigma_space": 40,
+      "image": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "Image Median Filter",
+    "_meta": {
+      "title": "Image Median Filter"
+    }
+  },
+  "26": {
+    "inputs": {
+      "image_a": [
+        "17",
+        0
+      ],
+      "image_b": [
+        "25",
+        0
+      ],
+      "boolean": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "Image Input Switch",
+    "_meta": {
+      "title": "Frequency_Switch"
+    }
+  },
+  "27": {
+    "inputs": {
+      "value": true
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Boolean"
     }
   }
 }

@@ -21,13 +21,16 @@ class Pipeline:
     def get_vision_report(self, base64_image: str) -> dict:
         prompt = (
             "You are an expert archival document restorer. Analyze this historical document image. "
-            "Determine if it needs geometry correction (rotation), frequency correction (noise/bleed-through removal), "
-            "or thresholding (contrast/faded ink fixing). "
-            "Reply ONLY with a raw JSON object using this exact structure and adhering to the value ranges:\n"
+            "Reply ONLY with a raw JSON object using this exact structure:\n"
             "{\n"
-            "  \"geometry\": {\"active\": true/false, \"rotation_angle\": float (-45.0 to 45.0, positive is clockwise)},\n"
-            "  \"frequency\": {\"active\": true/false, \"blur_radius\": int (5 to 50, higher for thicker noise), \"blend_percentage\": float (0.1 to 1.0)},\n"
-            "  \"threshold\": {\"active\": true/false, \"level\": float (0.05 to 0.95, lower means darker ink)}\n"
+            "  \"geometry\": {\"active\": true/false, \"rotation_angle\": int (1 to 360},\n"
+            "  \"frequency\": {\"active\": true/false, \"blur_radius\": int (5 to 50)},\n"
+            "  \"denoise\": {\n"
+            "    \"active\": true/false, \n"
+            "    \"sigma_color\": float (10.0 to 30.0, lower preserves fine handwriting),\n"
+            "    \"sigma_space\": float (20.0 to 60.0, higher flattens heavy paper grain)\n"
+            "  },\n"
+            "  \"threshold\": {\"active\": true/false, \"level\": float (0.10 to 0.40)}\n"
             "}"
         )
         
@@ -77,27 +80,41 @@ class Pipeline:
 
         # 3. INJECT DYNAMIC PARAMETERS
         workflow["1"]["inputs"]["image"] = filename
+
+        # --- Denoise (Bilateral/Median Filter) Injection ---
+        # We use Node 27 to toggle the branch and Node 25 for the values
+        denoise = report.get("denoise", {})
+        is_denoise_active = denoise.get("active", False)
+        workflow["27"]["inputs"]["value"] = is_denoise_active 
+        if is_denoise_active:
+            workflow["25"]["inputs"]["sigma_color"] = float(denoise.get("sigma_color", 15.0))
+            workflow["25"]["inputs"]["sigma_space"] = float(denoise.get("sigma_space", 40.0))
         
+        # --- Geometry Injection ---
         geo = report.get("geometry", {})
         is_geo_active = geo.get("active", False)
         workflow["20"]["inputs"]["value"] = is_geo_active 
         if is_geo_active:
-            workflow["6"]["inputs"]["rotation"] = float(geo.get("rotation_angle", 0.0))
+            workflow["6"]["inputs"]["rotation"] = int(geo.get("rotation_angle", 0))
         
+        # --- Frequency Injection ---
         freq = report.get("frequency", {})
         is_freq_active = freq.get("active", False)
         workflow["21"]["inputs"]["value"] = is_freq_active 
         if is_freq_active:
             workflow["3"]["inputs"]["blur_radius"] = int(freq.get("blur_radius", 20))
+            # Note: Ensure blend_percentage is actually a field in Node 4
             workflow["4"]["inputs"]["blend_percentage"] = float(freq.get("blend_percentage", 1.0))
         
+        # --- Thresholding Injection ---
+        # We use Node 22 to toggle the branch and Node 2 for the values
         thresh = report.get("threshold", {})
         is_thresh_active = thresh.get("active", False)
         workflow["22"]["inputs"]["value"] = is_thresh_active 
         if is_thresh_active:
-            workflow["2"]["inputs"]["threshold"] = float(thresh.get("level", 0.1))
+            workflow["2"]["inputs"]["threshold"] = float(thresh.get("level", 0.20))
 
-        # 4. Trigger the ComfyUI Generation
+        # 5. Trigger the ComfyUI Generation
         req_data = {"prompt": workflow}
         prompt_res = requests.post(f"{self.valves.COMFYUI_URL}/prompt", json=req_data).json()
         
@@ -107,7 +124,7 @@ class Pipeline:
 
         prompt_id = prompt_res["prompt_id"]
 
-        # 5. Poll for completion safely
+        # 6. Poll for completion safely
         max_retries = 60 
         retries = 0
         while retries < max_retries:
