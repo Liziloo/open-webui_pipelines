@@ -10,9 +10,9 @@
   },
   "2": {
     "inputs": {
-      "threshold": 0.2,
+      "threshold": 0.1,
       "image": [
-        "26",
+        "25",
         0
       ]
     },
@@ -23,7 +23,7 @@
   },
   "3": {
     "inputs": {
-      "blur_radius": 15,
+      "blur_radius": 20,
       "sigma": 1,
       "image": [
         "16",
@@ -126,7 +126,7 @@
         0
       ],
       "image_b": [
-        "4",
+        "28",
         0
       ],
       "boolean": [
@@ -142,11 +142,11 @@
   "18": {
     "inputs": {
       "image_a": [
-        "26",
+        "25",
         0
       ],
       "image_b": [
-        "24",
+        "2",
         0
       ],
       "boolean": [
@@ -161,7 +161,7 @@
   },
   "20": {
     "inputs": {
-      "value": true
+      "value": false
     },
     "class_type": "PrimitiveBoolean",
     "_meta": {
@@ -170,7 +170,7 @@
   },
   "21": {
     "inputs": {
-      "value": true
+      "value": false
     },
     "class_type": "PrimitiveBoolean",
     "_meta": {
@@ -179,7 +179,7 @@
   },
   "22": {
     "inputs": {
-      "value": true
+      "value": false
     },
     "class_type": "PrimitiveBoolean",
     "_meta": {
@@ -199,41 +199,14 @@
       "title": "Save Image"
     }
   },
-  "24": {
-    "inputs": {
-      "image": [
-        "2",
-        0
-      ]
-    },
-    "class_type": "ImageInvert",
-    "_meta": {
-      "title": "Invert Image"
-    }
-  },
   "25": {
-    "inputs": {
-      "diameter": 7,
-      "sigma_color": 15,
-      "sigma_space": 40,
-      "image": [
-        "17",
-        0
-      ]
-    },
-    "class_type": "Image Median Filter",
-    "_meta": {
-      "title": "Image Median Filter"
-    }
-  },
-  "26": {
     "inputs": {
       "image_a": [
         "17",
         0
       ],
       "image_b": [
-        "25",
+        "26",
         0
       ],
       "boolean": [
@@ -246,13 +219,47 @@
       "title": "Frequency_Switch"
     }
   },
+  "26": {
+    "inputs": {
+      "diameter": 3,
+      "sigma_color": 10,
+      "sigma_space": 10,
+      "image": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "Image Median Filter",
+    "_meta": {
+      "title": "Image Median Filter"
+    }
+  },
   "27": {
     "inputs": {
-      "value": true
+      "value": false
     },
     "class_type": "PrimitiveBoolean",
     "_meta": {
       "title": "Boolean"
+    }
+  },
+  "28": {
+    "inputs": {
+      "image": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "ImageInvert",
+    "_meta": {
+      "title": "Invert Image"
+    }
+  },
+  "29": {
+    "inputs": {},
+    "class_type": "ImageInvert",
+    "_meta": {
+      "title": "Invert Image"
     }
   }
 }

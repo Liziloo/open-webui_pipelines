@@ -87,8 +87,9 @@ class Pipeline:
         is_denoise_active = denoise.get("active", False)
         workflow["27"]["inputs"]["value"] = is_denoise_active 
         if is_denoise_active:
-            workflow["25"]["inputs"]["sigma_color"] = float(denoise.get("sigma_color", 15.0))
-            workflow["25"]["inputs"]["sigma_space"] = float(denoise.get("sigma_space", 40.0))
+            workflow["26"]["inputs"]["sigma_color"] = min(30.0, float(denoise.get("sigma_color", 10.0)))
+            workflow["26"]["inputs"]["sigma_space"] = min(30.0, float(denoise.get("sigma_space", 10.0)))
+            workflow["26"]["inputs"]["diameter"] = min(7, max(1, int(denoise.get("diameter", 3))))
         
         # --- Geometry Injection ---
         geo = report.get("geometry", {})
