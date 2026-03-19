@@ -8,6 +8,7 @@
 ## Zone B: Pipeline Service (mini‑PC)
 
 - Reads `batch_job.json` or single‑page requests.
+- **[NEW] Executes Triage Pre-processing (Image resizing/conversion).**
 - Runs policy logic, file I/O, and calls Ollama/Comfy/Kraken/Doctr.
 - Writes `page_state.json`, `batch_summary.json`, and page artifacts.
 - Stores everything as files in `/data` with directory structure described below.
@@ -17,6 +18,20 @@
 - ComfyUI runs image preprocessing.
 - Ollama runs the LLM models (Vision for triage, Text for iteration).
 - Kraken / Doctr run OCR and produce metrics.
+
+---
+
+### The Thumbnail Triage Protocol
+
+To maximize inference speed and preserve LLM context space, the Pipeline Service enforces a strict triage protocol _before_ Pass 0:
+
+1.  **Ingest:** Receive the full-resolution `original.tif`.
+2.  **Archive:** Save the full-res `original.tif` to the `/mnt/data/` HDD pool immediately.
+3.  **Process:** Generate a low-resolution, standardized thumbnail (e.g., JPEG, max 1024px on the longest edge).
+4.  **Cache:** Save this `abc123_triage_thumb.jpg` to the local SSD (`/app/pipelines/historic_image_cleaner/temp/ocr_input/`).
+5.  **Analyze:** The Vision-LLM in **Ollama** _only ever_ sees this thumbnail.
+
+---
 
 ### Directory Trees
 
@@ -191,7 +206,7 @@ _Files that need faster and more frequent access by the system get stored on SSD
         "word_count": 42,
         "metrics_path": "/mnt/data/projects/1890_us_census_ohio/processed/pages/abc123/pass0_ocr.json"
       },
-      "artifact_path": "pass0_original.png"
+      "artifact_path": "pass0_triage_thumb.jpg"
     },
     {
       "pass_index": 1,
@@ -266,14 +281,14 @@ When the **Pipeline Service (Zone B)** executes a pass, it targets the **GPU Box
 
 ### Zone B $\rightarrow$ Ollama (The Policy)
 
-The "Single Glance" rule ensures the Vision-LLM only analyzes the image once at the start.
+The "Single Glance" rule ensures the Vision-LLM only analyzes the image once at the start, **specifically analyzing the generated thumbnail.**
 
-1.  **Pass 0 (Vision Triage):** The Pipeline sends the `original.tif`.
+1.  **Pass 0 (Vision Triage):** The Pipeline sends the standardized **Thumbnail image (`pass0_triage_thumb.jpg`)**.
 
-    > "Analyze this document. Categorize the physical degradation (faded, skewed, noise). Provide an initial strategy based on the `ops_catalog`."
+    > "Analyze this historical document thumbnail. Categorize the physical degradation (faded, skewed, noise). Provide an initial strategy based on the `ops_catalog`."
     - Result is saved to `policy_notes`.
 
-2.  **Pass 1+ (Iterative Feedback):** The Pipeline sends **only text**.
-    > "Initial Triage: [policy_notes]. Current OCR confidence is 0.62. Applied Ops in Pass 1: [history[1]]. Based on the `ops_catalog`, return a JSON array of recommended adjustments to reach the threshold."
+2.  **Pass 1+ (Iterative Feedback):** The Pipeline sends **only text**. No images are transmitted.
+    > "Initial Triage (via thumb): [policy_notes]. Current full-res OCR confidence is 0.62. Applied Ops in Pass 1: [history[1]]. Based on the `ops_catalog`, return a JSON array of recommended adjustments to reach the threshold."
 
 ---
