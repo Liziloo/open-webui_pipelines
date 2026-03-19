@@ -70,14 +70,30 @@ class Pipeline:
     def get_initial_triage(self, thumb_path: str) -> dict:
         with open(thumb_path, "rb") as f:
             thumb_b64 = base64.b64encode(f.read()).decode('utf-8')
+        
+        # We define the expected schema based on your ops_catalog
         prompt = (
-            "Analyze this archival document thumbnail. Identify geometry, noise, and thresholding needs. "
-            "Reply ONLY with a raw JSON object: "
-            "{\"geometry\": {\"active\": bool, \"rotation_angle\": int}, "
-            "\"denoise\": {\"active\": bool, \"sigma_color\": float, \"sigma_space\": float}, "
-            "\"threshold\": {\"active\": bool, \"level\": float}}"
+            "Analyze this archival document. Provide a restoration strategy using these specific operations:\n"
+            "1. 'transform': geometry, rotation, padding, and upscale.\n"
+            "2. 'frequency': background/stain neutralization via blur and blend.\n"
+            "3. 'denoise': noise/artifact reduction via median filter.\n"
+            "4. 'threshold': final binarization level.\n\n"
+            "Reply ONLY with a JSON object matching this structure:\n"
+            "{"
+            "  \"transform\": {\"active\": bool, \"rotation_angle\": float, \"scale_by\": float, \"pad\": [top, right, bottom, left]},"
+            "  \"frequency\": {\"active\": bool, \"blur_radius\": int, \"sigma\": float, \"blend_percentage\": float},"
+            "  \"denoise\": {\"active\": bool, \"diameter\": int, \"sigma_color\": float, \"sigma_space\": float},"
+            "  \"threshold\": {\"active\": bool, \"threshold\": float}"
+            "}"
         )
-        payload = {"model": self.valves.VISION_MODEL, "messages": [{"role": "user", "content": prompt, "images": [thumb_b64]}], "format": "json", "stream": False}
+        
+        payload = {
+            "model": self.valves.VISION_MODEL,
+            "messages": [{"role": "user", "content": prompt, "images": [thumb_b64]}],
+            "format": "json", 
+            "stream": False
+        }
+        
         res = requests.post(f"{self.valves.OLLAMA_URL}/api/chat", json=payload).json()
         return json.loads(res["message"]["content"])
 

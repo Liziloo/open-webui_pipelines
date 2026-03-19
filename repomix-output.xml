@@ -1,0 +1,617 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+comfyui/
+  document_restoration/
+    historic_image_cleaner_pipeline.py
+.gitignore
+LICENSE
+README.md
+SPEC.md
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="LICENSE">
+MIT License
+
+Copyright (c) 2026 Liz
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+</file>
+
+<file path="README.md">
+# open-webui_pipelines
+My custom pipelines for Open WebUI using local ollama server
+</file>
+
+<file path=".gitignore">
+# Dependency Directories
+node_modules/
+.npm/
+
+# Build & Cache
+.eslintcache
+package-lock.json
+__pycache__/
+*.py[cod]
+
+# Pipeline Runtime Artifacts (SSD)
+# Ignore the logs and the changing state files
+pipeline.log
+active_sessions/
+temp/
+
+# Environment & IDE
+.env
+.venv/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Project-specific Data (if any samples are local)
+*.tif
+*.png
+*.json
+!ops_catalog.json
+!archival_ocr_prep.json
+</file>
+
+<file path="SPEC.md">
+# System Spec
+
+## Zone A: Open WebUI + chat‑mode (mini‑PC)
+
+- Handles uploads, shows images, lets you tweak settings.
+- Talks to a small **pipeline service** on the mini‑PC.
+
+## Zone B: Pipeline Service (mini‑PC)
+
+- Reads `batch_job.json` or single‑page requests.
+- **[NEW] Executes Triage Pre-processing (Image resizing/conversion).**
+- Runs policy logic, file I/O, and calls Ollama/Comfy/Kraken/Doctr.
+- Writes `page_state.json`, `batch_summary.json`, and page artifacts.
+- Stores everything as files in `/data` with directory structure described below.
+
+## Zone C: ComfyUI, Ollama, Kraken, Doctr (GPU box)
+
+- ComfyUI runs image preprocessing.
+- Ollama runs the LLM models (Vision for triage, Text for iteration).
+- Kraken / Doctr run OCR and produce metrics.
+
+---
+
+### The Thumbnail Triage Protocol
+
+To maximize inference speed and preserve LLM context space, the Pipeline Service enforces a strict triage protocol _before_ Pass 0:
+
+1.  **Ingest:** Receive the full-resolution `original.tif`.
+2.  **Archive:** Save the full-res `original.tif` to the `/mnt/data/` HDD pool immediately.
+3.  **Process:** Generate a low-resolution, standardized thumbnail (e.g., JPEG, max 1024px on the longest edge).
+4.  **Cache:** Save this `abc123_triage_thumb.jpg` to the local SSD (`/app/pipelines/historic_image_cleaner/temp/ocr_input/`).
+5.  **Analyze:** The Vision-LLM in **Ollama** _only ever_ sees this thumbnail.
+
+---
+
+### Directory Trees
+
+_Largely static files can be stored on HDD pool directory mounted to the computer with the large GPU via NFS_
+
+```txt
+/mnt/data
+├── projects
+│   ├── 1890_us_census_ohio
+│   │   ├── images
+│   │   │   ├── oh_cen1890_p0001.tif
+│   │   │   └── ...
+│   │   └── processed
+│   │       ├── pages
+│   │       │   ├── abc123
+│   │       │   │   ├── original.tif
+│   │       │   │   ├── pass0_comfy.png
+│   │       │   │   ├── pass0_ocr.json
+│   │       │   │   └── ...
+│   │       ├── summary
+│   │       │   ├── batch_summary.json
+│   │       │   └── pages_to_reprocess.txt
+│   │       └── batch_job.json
+│   ├── 1920_birth_records_germany
+│   ├── 1850_will_and_estate_ky
+```
+
+_Files that need faster and more frequent access by the system get stored on SSD_
+
+```txt
+/app
+├── openwebui
+├── pipelines/historic_image_cleaner
+│   ├── pipeline.log
+│   ├── comfy_workflows
+│   │   └── archival_ocr_prep.json
+│   ├── batch_job.json
+│   └── ops_catalog.json
+│   ├── active_sessions
+│   │   └── abc123_page_state.json
+│   └── batch_metadata
+│       └── batch_2026_03_18_census_1890
+│           ├── page_state.json
+│           └── workflow_profiles.json
+│   └── temp
+│       └── comfy_input
+│       └── ocr_input
+│       └── ocr_output
+```
+
+## Data Model & Schemas
+
+### 1. The Ops Catalog (`ops_catalog.json`)
+
+```json
+{
+  "operations": {
+    "geometry_transform": {
+      "op_id": "transform",
+      "description": "Handles spatial corrections including margin padding, sub-degree deskewing, and resolution upscaling to normalize the document canvas for the OCR engine.",
+      "active_switch_node": "20",
+      "nodes": {
+        "pad": {
+          "node_id": "5",
+          "inputs": {
+            "left": { "type": "int", "range": [0, 1024], "step": 8 },
+            "top": { "type": "int", "range": [0, 1024], "step": 8 },
+            "right": { "type": "int", "range": [0, 1024], "step": 8 },
+            "bottom": { "type": "int", "range": [0, 1024], "step": 8 }
+          }
+        },
+        "rotate": {
+          "node_id": "29",
+          "inputs": {
+            "rotation_angle": { "type": "float", "range": [0.0, 359.9] }
+          }
+        },
+        "upscale": {
+          "node_id": "7",
+          "inputs": {
+            "upscale_method": {
+              "type": "string",
+              "options": [
+                "nearest-exact",
+                "bilinear",
+                "area",
+                "bicubic",
+                "lanczos"
+              ]
+            },
+            "scale_by": { "type": "float", "range": [0.01, 8.0] }
+          }
+        }
+      }
+    },
+    "frequency_separation": {
+      "op_id": "frequency",
+      "description": "Isolates high-frequency text elements from low-frequency background noise by calculating a background map and subtracting it from the source to neutralize stains and parchment texture.",
+      "active_switch_node": "21",
+      "nodes": {
+        "blur": {
+          "node_id": "3",
+          "inputs": {
+            "blur_radius": { "type": "int", "range": [1, 31] },
+            "sigma": { "type": "float", "range": [0.1, 10.0] }
+          }
+        },
+        "blending_mode": {
+          "node_id": "4",
+          "inputs": {
+            "blend_percentage": { "type": "float", "range": [0.0, 1.0] }
+          }
+        }
+      }
+    },
+    "noise_reduction": {
+      "op_id": "denoise",
+      "description": "Applies non-linear smoothing via median filtering to suppress salt-and-pepper artifacts and foxing while maintaining sharp character edges.",
+      "active_switch_node": "27",
+      "nodes": {
+        "median_filter": {
+          "node_id": "25",
+          "inputs": {
+            "diameter": { "type": "int", "range": [0, 255] },
+            "sigma_color": { "type": "float", "range": [-255.0, 255.0] },
+            "sigma_space": { "type": "float", "range": [-255.0, 255.0] }
+          }
+        }
+      }
+    },
+    "adaptive_threshold": {
+      "op_id": "threshold",
+      "description": "The final binarization stage; converts processed imagery into high-contrast 1-bit black and white data to maximize character recognition accuracy.",
+      "active_switch_node": "22",
+      "nodes": {
+        "threshold": {
+          "node_id": "2",
+          "inputs": {
+            "threshold": { "type": "float", "range": [0.0, 1.0] }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### 2. The Page State (`page_state.json`)
+
+```json
+{
+  "page_metadata": {
+    "page_id": "abc123",
+    "project_id": "1890_us_census_ohio",
+    "source_path": "/mnt/data/projects/1890_us_census_ohio/images/p0001.tif",
+    "created_at": "2026-03-19T11:40:00Z"
+  },
+  "processing_status": {
+    "current_pass": 2,
+    "max_passes": 5,
+    "is_converged": false,
+    "final_ocr_confidence": 0.0
+  },
+  "history": [
+    {
+      "pass_index": 0,
+      "timestamp": "2026-03-19T11:41:00Z",
+      "ops_applied": [],
+      "ocr_results": {
+        "engine": "doctr",
+        "confidence_avg": 0.35,
+        "word_count": 42,
+        "metrics_path": "/mnt/data/projects/1890_us_census_ohio/processed/pages/abc123/pass0_ocr.json"
+      },
+      "artifact_path": "pass0_triage_thumb.jpg"
+    },
+    {
+      "pass_index": 1,
+      "timestamp": "2026-03-19T11:42:30Z",
+      "ops_applied": [
+        {
+          "op_id": "threshold",
+          "params": { "threshold": 0.45 }
+        }
+      ],
+      "ocr_results": {
+        "engine": "doctr",
+        "confidence_avg": 0.62,
+        "word_count": 115,
+        "metrics_path": "/mnt/data/projects/1890_us_census_ohio/processed/pages/abc123/pass1_ocr.json"
+      },
+      "artifact_path": "pass1_thresholded.png"
+    }
+  ],
+  "policy_notes": "Last OCR pass showed significant improvement in word count but low character confidence. Suggesting noise reduction to clear background speckling."
+}
+```
+
+### 3. The Batch Job (`batch_job.json`)
+
+```json
+{
+  "batch_metadata": {
+    "batch_id": "batch_2026_03_18_census_ohio",
+    "project_name": "1890_us_census_ohio",
+    "priority": 1,
+    "notes": "Archival census scans from Hamilton County. High frequency of bleed-through expected."
+  },
+  "input_output": {
+    "input_directory": "/mnt/data/projects/1890_us_census_ohio/images/",
+    "output_base_directory": "/mnt/data/projects/1890_us_census_ohio/processed/",
+    "file_pattern": "*.tif"
+  },
+  "runtime_constraints": {
+    "max_passes_per_page": 5,
+    "min_confidence_threshold": 0.85,
+    "ocr_engine": "doctr",
+    "policy_model": "llama3-vision",
+    "timeout_per_page_seconds": 120
+  },
+  "default_ops": [
+    {
+      "op_id": "threshold",
+      "params": { "threshold": 0.5 }
+    }
+  ],
+  "batch_status": {
+    "state": "active",
+    "started_at": "2026-03-19T10:00:00Z",
+    "completed_pages": 45,
+    "total_pages": 1200,
+    "failed_pages": 2
+  }
+}
+```
+
+---
+
+## Communication Logic (The "Bridges")
+
+### Zone B $\rightarrow$ Zone C (The Request)
+
+When the **Pipeline Service (Zone B)** executes a pass, it targets the **GPU Box (Zone C)** endpoints:
+
+- **POST /comfy_execute:** Sends the `archival_ocr_prep.json` workflow with parameters injected from the current `page_state`.
+- **POST /ocr_process:** Sends the path of the generated `passN_comfy.png` and receives the `ocr_metrics.json`.
+
+### Zone B $\rightarrow$ Ollama (The Policy)
+
+The "Single Glance" rule ensures the Vision-LLM only analyzes the image once at the start, **specifically analyzing the generated thumbnail.**
+
+1.  **Pass 0 (Vision Triage):** The Pipeline sends the standardized **Thumbnail image (`pass0_triage_thumb.jpg`)**.
+
+    > "Analyze this historical document thumbnail. Categorize the physical degradation (faded, skewed, noise). Provide an initial strategy based on the `ops_catalog`."
+    - Result is saved to `policy_notes`.
+
+2.  **Pass 1+ (Iterative Feedback):** The Pipeline sends **only text**. No images are transmitted.
+    > "Initial Triage (via thumb): [policy_notes]. Current full-res OCR confidence is 0.62. Applied Ops in Pass 1: [history[1]]. Based on the `ops_catalog`, return a JSON array of recommended adjustments to reach the threshold."
+
+---
+</file>
+
+<file path="comfyui/document_restoration/historic_image_cleaner_pipeline.py">
+import os
+import time
+import json
+import base64
+import requests
+import io
+import hashlib
+from PIL import Image
+from typing import List, Union, Generator
+from pydantic import BaseModel
+from typing import TypedDict
+
+class OpenWebUIBody(TypedDict, total=False):
+    chat_id: str
+    model: str
+    session_id: str
+    metadata: dict
+
+class Pipeline:
+    class Valves(BaseModel):
+        OLLAMA_URL: str = "http://192.168.2.86:11434"
+        COMFYUI_URL: str = "http://192.168.2.86:8188"
+        VISION_MODEL: str = "llama3.2-vision:latest"
+        TEXT_MODEL: str = "llama3.1:8b"
+        MAX_ITERATIONS: int = 3
+        WORKFLOW_JSON_PATH: str = "/app/backend/data/document_restoration_flow.json"
+        BASE_DATA_DIR: str = "/mnt/data/projects/open_webui_chats"
+        SESSION_DIR: str = "/app/pipelines/historic_image_cleaner/active_sessions"
+        TEMP_DIR: str = "/app/pipelines/historic_image_cleaner/temp"
+
+    def __init__(self):
+        self.valves = self.Valves()
+
+    def generate_page_id(self, base64_image: str) -> str:
+        img_bytes = base64.b64decode(base64_image)
+        return hashlib.sha256(img_bytes).hexdigest()[:8]
+
+    def generate_triage_artifacts(self, project_id: str, base64_image: str):
+        page_id = self.generate_page_id(base64_image)
+        hdd_base = os.path.join(self.valves.BASE_DATA_DIR, project_id, page_id)
+        os.makedirs(hdd_base, exist_ok=True)
+        os.makedirs(self.valves.TEMP_DIR, exist_ok=True)
+
+        hdd_path = os.path.join(hdd_base, "original.tif")
+        ssd_thumb_path = os.path.join(self.valves.TEMP_DIR, f"{page_id}_thumb.jpg")
+
+        img_data = base64.b64decode(base64_image)
+        with open(hdd_path, "wb") as f:
+            f.write(img_data)
+
+        with Image.open(io.BytesIO(img_data)) as img:
+            img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+            if img.mode in ("RGBA", "P"): img = img.convert("RGB")
+            img.save(ssd_thumb_path, "JPEG", quality=85)
+        
+        return page_id, hdd_path, ssd_thumb_path
+
+    def update_page_state(self, page_id: str, updates: dict) -> dict:
+        state_path = os.path.join(self.valves.SESSION_DIR, f"{page_id}_page_state.json")
+        os.makedirs(self.valves.SESSION_DIR, exist_ok=True)
+        state = {}
+        if os.path.exists(state_path):
+            with open(state_path, "r") as f:
+                state = json.load(f)
+        state.update(updates)
+        with open(state_path, "w") as f:
+            json.dump(state, f, indent=2)
+        return state
+
+    def get_initial_triage(self, thumb_path: str) -> dict:
+        with open(thumb_path, "rb") as f:
+            thumb_b64 = base64.b64encode(f.read()).decode('utf-8')
+        
+        # We define the expected schema based on your ops_catalog
+        prompt = (
+            "Analyze this archival document. Provide a restoration strategy using these specific operations:\n"
+            "1. 'transform': geometry, rotation, padding, and upscale.\n"
+            "2. 'frequency': background/stain neutralization via blur and blend.\n"
+            "3. 'denoise': noise/artifact reduction via median filter.\n"
+            "4. 'threshold': final binarization level.\n\n"
+            "Reply ONLY with a JSON object matching this structure:\n"
+            "{"
+            "  \"transform\": {\"active\": bool, \"rotation_angle\": float, \"scale_by\": float, \"pad\": [top, right, bottom, left]},"
+            "  \"frequency\": {\"active\": bool, \"blur_radius\": int, \"sigma\": float, \"blend_percentage\": float},"
+            "  \"denoise\": {\"active\": bool, \"diameter\": int, \"sigma_color\": float, \"sigma_space\": float},"
+            "  \"threshold\": {\"active\": bool, \"threshold\": float}"
+            "}"
+        )
+        
+        payload = {
+            "model": self.valves.VISION_MODEL,
+            "messages": [{"role": "user", "content": prompt, "images": [thumb_b64]}],
+            "format": "json", 
+            "stream": False
+        }
+        
+        res = requests.post(f"{self.valves.OLLAMA_URL}/api/chat", json=payload).json()
+        return json.loads(res["message"]["content"])
+
+    def get_next_adjustment(self, state: dict, current_ocr_confidence: float) -> dict:
+        prompt = (
+            f"Initial Triage Strategy: {json.dumps(state['policy_notes'])}\n"
+            f"Previous Attempts: {json.dumps(state['history'])}\n"
+            f"Current OCR Confidence: {current_ocr_confidence}\n"
+            "Adjust the parameters to improve readability. Return ONLY the updated JSON parameters."
+        )
+        payload = {"model": self.valves.TEXT_MODEL, "messages": [{"role": "user", "content": prompt}], "format": "json", "stream": False}
+        res = requests.post(f"{self.valves.OLLAMA_URL}/api/chat", json=payload).json()
+        return json.loads(res["message"]["content"])
+
+    def process_in_comfyui(self, project_id: str, page_id: str, iteration: int, image_bytes: bytes, report: dict) -> bytes:
+        files = {"image": (f"{page_id}_pass{iteration}.png", image_bytes, "image/png")}
+        upload_res = requests.post(f"{self.valves.COMFYUI_URL}/upload/image", files=files).json()
+        
+        with open(self.valves.WORKFLOW_JSON_PATH, "r") as f:
+            workflow = json.load(f)
+
+        workflow["1"]["inputs"]["image"] = upload_res["name"]
+        
+        # --- Mapping Logic ---
+        denoise = report.get("denoise", {})
+        workflow["27"]["inputs"]["value"] = denoise.get("active", False)
+        if denoise.get("active"):
+            workflow["26"]["inputs"]["sigma_color"] = denoise.get("sigma_color", 10.0)
+            workflow["26"]["inputs"]["sigma_space"] = denoise.get("sigma_space", 10.0)
+
+        geo = report.get("geometry", {})
+        workflow["20"]["inputs"]["value"] = geo.get("active", False)
+        if geo.get("active"):
+            workflow["6"]["inputs"]["rotation"] = geo.get("rotation_angle", 0)
+
+        thresh = report.get("threshold", {})
+        workflow["22"]["inputs"]["value"] = thresh.get("active", False)
+        if thresh.get("active"):
+            workflow["2"]["inputs"]["threshold"] = thresh.get("level", 0.20)
+
+        # Write workflow to HDD audit trail
+        pass_workflow_path = os.path.join(self.valves.BASE_DATA_DIR, project_id, page_id, f"pass_{iteration}_workflow.json")
+        with open(pass_workflow_path, "w") as f:
+            json.dump(workflow, f, indent=2)
+
+        prompt_res = requests.post(f"{self.valves.COMFYUI_URL}/prompt", json={"prompt": workflow}).json()
+        prompt_id = prompt_res["prompt_id"]
+
+        for _ in range(60):
+            hist = requests.get(f"{self.valves.COMFYUI_URL}/history/{prompt_id}").json()
+            if prompt_id in hist:
+                out = hist[prompt_id]["outputs"]["23"]["images"][0]["filename"]
+                return requests.get(f"{self.valves.COMFYUI_URL}/view?filename={out}").content
+            time.sleep(1.5)
+        raise TimeoutError("ComfyUI Timeout")
+
+    def pipe(self, user_message: str, model_id: str, messages: List[dict], body: OpenWebUIBody) -> Union[str, Generator]:
+        project_id = body.get("chat_id", "manual_upload")
+        base64_image = self._extract_image(messages) 
+        if not base64_image: yield "No image found."; return
+
+        yield "👁️ **Pass 0: Initial Vision Triage...**\n"
+        page_id, hdd_path, thumb_path = self.generate_triage_artifacts(project_id, base64_image)
+        initial_policy = self.get_initial_triage(thumb_path)
+        
+        state = self.update_page_state(page_id, {
+            "page_metadata": {"page_id": page_id, "project_id": project_id, "source_path": hdd_path},
+            "policy_notes": initial_policy,
+            "history": []
+        })
+
+        current_bytes = base64.b64decode(base64_image)
+        current_confidence = 0.0
+        iteration = 0
+
+        while iteration < self.valves.MAX_ITERATIONS and current_confidence < 0.9:
+            iteration += 1
+            yield f"\n### Pass {iteration}\n"
+            params = initial_policy if iteration == 1 else self.get_next_adjustment(state, current_confidence)
+            yield f"- **Parameters**: `{json.dumps(params)}`"
+            
+            try:
+                current_bytes = self.process_in_comfyui(project_id, page_id, iteration, current_bytes, params)
+                current_confidence += 0.3 # Mock OCR increment
+                state["history"].append({"pass": iteration, "params": params, "conf": current_confidence})
+                self.update_page_state(page_id, {"history": state["history"]})
+                
+                img_b64 = base64.b64encode(current_bytes).decode('utf-8')
+                md_img = f"\n- ✅ Pass {iteration} complete (Confidence: {current_confidence:.2f})\n\n![Pass {iteration}](data:image/jpeg;base64,{img_b64})\n"
+                for i in range(0, len(md_img), 64*1024):
+                    yield md_img[i:i+(64*1024)]
+            except Exception as e:
+                yield f"\n❌ **Error:** {e}"; return
+
+        yield f"\n\n🎉 **Done.** Archive: `{page_id}`"
+
+    def _extract_image(self, messages):
+        for msg in reversed(messages):
+            if isinstance(msg.get("content"), list):
+                for item in msg["content"]:
+                    if item.get("type") == "image_url":
+                        url = item["image_url"]["url"]
+                        return url.split(",")[1] if "," in url else url
+        return None
+</file>
+
+</files>
