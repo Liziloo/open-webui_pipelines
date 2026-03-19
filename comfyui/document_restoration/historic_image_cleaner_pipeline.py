@@ -4,219 +4,195 @@ import json
 import base64
 import re
 import requests
-from typing import List, Union, Generator, Iterator
-from pydantic import BaseModel, Field
+import io
+import hashlib
+from PIL import Image
+from typing import List, Union, Generator, Iterator, Any, Optional
+from pydantic import BaseModel
+from typing import TypedDict
+
+class OpenWebUIBody(TypedDict, total=False):
+    chat_id: str
+    model: str
+    session_id: str
+    metadata: dict
 
 class Pipeline:
     class Valves(BaseModel):
         OLLAMA_URL: str = "http://192.168.2.86:11434"
         COMFYUI_URL: str = "http://192.168.2.86:8188"
         VISION_MODEL: str = "llama3.2-vision:latest"
+        TEXT_MODEL: str = "llama3.1:8b" # Faster text-only model for the loop
         MAX_ITERATIONS: int = 3
         WORKFLOW_JSON_PATH: str = "/app/backend/data/document_restoration_flow.json"
+        BASE_DATA_DIR: str = "/mnt/data/projects/open_webui_chats"
+        SESSION_DIR: str = "/app/pipelines/historic_image_cleaner/active_sessions"
+        TEMP_DIR: str = "/app/pipelines/historic_image_cleaner/temp"
 
     def __init__(self):
         self.valves = self.Valves()
 
-    def get_vision_report(self, base64_image: str) -> dict:
+    def generate_page_id(self, base64_image: str) -> str:
+        img_bytes = base64.b64decode(base64_image)
+        return hashlib.sha256(img_bytes).hexdigest()[:8]
+
+    def generate_triage_artifacts(self, body: OpenWebUIBody, base64_image: str):
+        page_id = self.generate_page_id(base64_image)
+        project_id = body.get("chat_id", "chat_experimental")
+        hdd_base = os.path.join(self.valves.BASE_DATA_DIR, project_id, page_id)
+        os.makedirs(hdd_base, exist_ok=True)
+        os.makedirs(self.valves.TEMP_DIR, exist_ok=True)
+
+        hdd_path = os.path.join(hdd_base, "original.tif")
+        ssd_thumb_path = os.path.join(self.valves.TEMP_DIR, f"{page_id}_thumb.jpg")
+
+        img_data = base64.b64decode(base64_image)
+        with open(hdd_path, "wb") as f:
+            f.write(img_data)
+
+        with Image.open(io.BytesIO(img_data)) as img:
+            img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+            if img.mode in ("RGBA", "P"): img = img.convert("RGB")
+            img.save(ssd_thumb_path, "JPEG", quality=85)
+        
+        return page_id, hdd_path, ssd_thumb_path
+
+    def update_page_state(self, page_id: str, updates: dict) -> dict:
+        state_path = os.path.join(self.valves.SESSION_DIR, f"{page_id}_page_state.json")
+        os.makedirs(self.valves.SESSION_DIR, exist_ok=True)
+        
+        state = {}
+        if os.path.exists(state_path):
+            with open(state_path, "r") as f:
+                state = json.load(f)
+        
+        state.update(updates)
+        with open(state_path, "w") as f:
+            json.dump(state, f, indent=2)
+        return state
+
+    def get_initial_triage(self, thumb_path: str) -> dict:
+        """PASS 0: The 'Single Glance' using the Vision Model."""
+        with open(thumb_path, "rb") as f:
+            thumb_b64 = base64.b64encode(f.read()).decode('utf-8')
+
         prompt = (
-            "You are an expert archival document restorer. Analyze this historical document image. "
-            "Reply ONLY with a raw JSON object using this exact structure:\n"
-            "{\n"
-            "  \"geometry\": {\"active\": true/false, \"rotation_angle\": int (1 to 360},\n"
-            "  \"frequency\": {\"active\": true/false, \"blur_radius\": int (5 to 50)},\n"
-            "  \"denoise\": {\n"
-            "    \"active\": true/false, \n"
-            "    \"sigma_color\": float (10.0 to 30.0, lower preserves fine handwriting),\n"
-            "    \"sigma_space\": float (20.0 to 60.0, higher flattens heavy paper grain)\n"
-            "  },\n"
-            "  \"threshold\": {\"active\": true/false, \"level\": float (0.10 to 0.40)}\n"
-            "}"
+            "Analyze this archival document thumbnail. Identify geometry, noise, and thresholding needs. "
+            "Reply ONLY with a raw JSON object: "
+            "{\"geometry\": {\"active\": bool, \"rotation_angle\": int}, "
+            "\"denoise\": {\"active\": bool, \"sigma_color\": float}, "
+            "\"threshold\": {\"active\": bool, \"level\": float}}"
         )
         
         payload = {
             "model": self.valves.VISION_MODEL,
-            "messages":[
-                {
-                    "role": "user",
-                    "content": prompt,
-                    "images":[base64_image]
-                }
-            ],
-            "format": "json",
-            "stream": False
+            "messages": [{"role": "user", "content": prompt, "images": [thumb_b64]}],
+            "format": "json", "stream": False
         }
         
-        try:
-            response = requests.post(f"{self.valves.OLLAMA_URL}/api/chat", json=payload).json()
-            content = response["message"]["content"]
-            
-            match = re.search(r'\{.*\}', content, re.DOTALL)
-            if match:
-                return json.loads(match.group(0))
-            return json.loads(content)
-        except Exception as e:
-            print(f"Vision grading failed: {e}")
-            return {
-                "geometry": {"active": False},
-                "frequency": {"active": False},
-                "threshold": {"active": False}
-            }
+        res = requests.post(f"{self.valves.OLLAMA_URL}/api/chat", json=payload).json()
+        return json.loads(res["message"]["content"])
 
-    def process_in_comfyui(self, base64_image: str, report: dict) -> bytes:
-        # 1. Upload image to ComfyUI
-        img_data = base64.b64decode(base64_image)
-        files = {"image": ("temp_doc.jpg", img_data, "image/jpeg")}
+    def get_next_adjustment(self, state: dict, current_ocr_confidence: float) -> dict:
+        """PASS 1+: Text-only feedback loop. No images sent."""
+        prompt = (
+            f"Initial Triage Strategy: {json.dumps(state['policy_notes'])}\n"
+            f"Previous Attempts: {json.dumps(state['history'])}\n"
+            f"Current OCR Confidence: {current_ocr_confidence}\n"
+            "Based on the OCR score, adjust the parameters to improve readability. "
+            "Return ONLY the updated JSON parameters."
+        )
+        
+        payload = {
+            "model": self.valves.TEXT_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "format": "json", "stream": False
+        }
+        
+        res = requests.post(f"{self.valves.OLLAMA_URL}/api/chat", json=payload).json()
+        return json.loads(res["message"]["content"])
+
+    def process_in_comfyui(self, image_bytes: bytes, report: dict) -> bytes:
+        files = {"image": ("working.png", image_bytes, "image/png")}
         upload_res = requests.post(f"{self.valves.COMFYUI_URL}/upload/image", files=files).json()
-        filename = upload_res["name"]
-
-        # 2. Load the API JSON Workflow
-        workflow_path = self.valves.WORKFLOW_JSON_PATH
-        if not os.path.exists(workflow_path):
-            raise FileNotFoundError(f"Workflow file not found at {workflow_path}")
-            
-        with open(workflow_path, "r") as f:
+        
+        with open(self.valves.WORKFLOW_JSON_PATH, "r") as f:
             workflow = json.load(f)
 
-        # 3. INJECT DYNAMIC PARAMETERS
-        workflow["1"]["inputs"]["image"] = filename
+        workflow["1"]["inputs"]["image"] = upload_res["name"]
+        
+        # Mapping (Simplified for brevity)
+        workflow["27"]["inputs"]["value"] = report.get("denoise", {}).get("active", False)
+        workflow["20"]["inputs"]["value"] = report.get("geometry", {}).get("active", False)
+        workflow["22"]["inputs"]["value"] = report.get("threshold", {}).get("active", False)
+        
+        if report.get("threshold", {}).get("active"):
+            workflow["2"]["inputs"]["threshold"] = report["threshold"]["level"]
 
-        # --- Denoise (Bilateral/Median Filter) Injection ---
-        # We use Node 27 to toggle the branch and Node 25 for the values
-        denoise = report.get("denoise", {})
-        is_denoise_active = denoise.get("active", False)
-        workflow["27"]["inputs"]["value"] = is_denoise_active 
-        if is_denoise_active:
-            workflow["26"]["inputs"]["sigma_color"] = min(30.0, float(denoise.get("sigma_color", 10.0)))
-            workflow["26"]["inputs"]["sigma_space"] = min(30.0, float(denoise.get("sigma_space", 10.0)))
-            workflow["26"]["inputs"]["diameter"] = min(7, max(1, int(denoise.get("diameter", 3))))
-        
-        # --- Geometry Injection ---
-        geo = report.get("geometry", {})
-        is_geo_active = geo.get("active", False)
-        workflow["20"]["inputs"]["value"] = is_geo_active 
-        if is_geo_active:
-            workflow["6"]["inputs"]["rotation"] = int(geo.get("rotation_angle", 0))
-        
-        # --- Frequency Injection ---
-        freq = report.get("frequency", {})
-        is_freq_active = freq.get("active", False)
-        workflow["21"]["inputs"]["value"] = is_freq_active 
-        if is_freq_active:
-            workflow["3"]["inputs"]["blur_radius"] = int(freq.get("blur_radius", 20))
-            # Note: Ensure blend_percentage is actually a field in Node 4
-            workflow["4"]["inputs"]["blend_percentage"] = float(freq.get("blend_percentage", 1.0))
-        
-        # --- Thresholding Injection ---
-        # We use Node 22 to toggle the branch and Node 2 for the values
-        thresh = report.get("threshold", {})
-        is_thresh_active = thresh.get("active", False)
-        workflow["22"]["inputs"]["value"] = is_thresh_active 
-        if is_thresh_active:
-            workflow["2"]["inputs"]["threshold"] = float(thresh.get("level", 0.20))
-
-        # 5. Trigger the ComfyUI Generation
-        req_data = {"prompt": workflow}
-        prompt_res = requests.post(f"{self.valves.COMFYUI_URL}/prompt", json=req_data).json()
-        
-        if "error" in prompt_res:
-            err_msg = prompt_res["error"].get("message", "Unknown error")
-            raise RuntimeError(f"ComfyUI rejected the prompt: {err_msg}")
-
+        prompt_res = requests.post(f"{self.valves.COMFYUI_URL}/prompt", json={"prompt": workflow}).json()
         prompt_id = prompt_res["prompt_id"]
 
-        # 6. Poll for completion safely
-        max_retries = 60 
-        retries = 0
-        while retries < max_retries:
-            try:
-                history_res = requests.get(f"{self.valves.COMFYUI_URL}/history/{prompt_id}")
-                if history_res.status_code == 200:
-                    history = history_res.json()
-                    if prompt_id in history:
-                        # Safely check for outputs to avoid KeyErrors
-                        outputs = history[prompt_id].get("outputs", {})
-                        if "23" in outputs and "images" in outputs["23"]:
-                            out_filename = outputs["23"]["images"][0]["filename"]
-                            img_res = requests.get(f"{self.valves.COMFYUI_URL}/view?filename={out_filename}")
-                            if img_res.status_code == 200:
-                                return img_res.content
-                            else:
-                                raise RuntimeError("Failed to download image from ComfyUI.")
-                        elif "error" in history[prompt_id]:
-                            raise RuntimeError(f"ComfyUI Node Error: {history[prompt_id]['error']}")
-                        else:
-                            raise RuntimeError("ComfyUI finished but Node 23 produced no images.")
-            except requests.exceptions.RequestException:
-                pass # Ignore temporary network blips while polling
-            
+        for _ in range(60):
+            hist = requests.get(f"{self.valves.COMFYUI_URL}/history/{prompt_id}").json()
+            if prompt_id in hist:
+                out = hist[prompt_id]["outputs"]["23"]["images"][0]["filename"]
+                return requests.get(f"{self.valves.COMFYUI_URL}/view?filename={out}").content
             time.sleep(1.5)
-            retries += 1
-            
-        raise TimeoutError("ComfyUI generation timed out.")
+        raise TimeoutError("ComfyUI Timeout")
 
-    def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> Union[str, Generator, Iterator]:
-        base64_image = None
-        try:
-            for msg in reversed(messages):
-                if isinstance(msg.get("content"), list):
-                    for item in msg["content"]:
-                        if item.get("type") == "image_url":
-                            url = item["image_url"]["url"]
-                            # Safely split the base64 string
-                            base64_image = url.split(",")[1] if "," in url else url
-                            break
-                if base64_image:
-                    break
-        except Exception as e:
-            yield f"❌ Error reading uploaded image: {e}"
-            return
+    def pipe(self, user_message: str, model_id: str, messages: List[dict], body: OpenWebUIBody) -> Union[str, Generator]:
+        # 1. Image Extraction (Omitted for brevity, same as before)
+        base64_image = self._extract_image(messages) 
+        if not base64_image: yield "No image found."; return
 
-        if not base64_image:
-            yield "Please upload a document image for me to process."
-            return
+        # 2. Pass 0: The Single Glance
+        yield "👁️ **Pass 0: Initial Vision Triage...**\n"
+        page_id, hdd_path, thumb_path = self.generate_triage_artifacts(body, base64_image)
+        initial_policy = self.get_initial_triage(thumb_path)
+        
+        state = self.update_page_state(page_id, {
+            "page_metadata": {"page_id": page_id, "source_path": hdd_path},
+            "policy_notes": initial_policy,
+            "history": []
+        })
 
-        current_image = base64_image
+        current_bytes = base64.b64decode(base64_image)
+        current_confidence = 0.0 # Placeholder for OCR
         iteration = 0
-        is_clean = False
 
-        yield "🔍 **Starting Dynamic Document Restoration Pipeline**...\n"
-
-        while iteration < self.valves.MAX_ITERATIONS and not is_clean:
+        # 3. Iterative Text-Only Loop
+        while iteration < self.valves.MAX_ITERATIONS and current_confidence < 0.9:
             iteration += 1
-            yield f"\n### Iteration {iteration}\n"
-            yield "- 👀 AI is analyzing document and calculating parameters...\n"
+            yield f"\n### Pass {iteration}\n"
             
-            report = self.get_vision_report(current_image)
-            yield f"- **Calculated Parameters**: `{json.dumps(report, indent=2)}`\n"
+            # Determine parameters: Use initial policy for Pass 1, then Text-LLM for tweaks
+            if iteration == 1:
+                params = initial_policy
+            else:
+                yield "- 🧠 Text-LLM calculating adjustments based on OCR..."
+                params = self.get_next_adjustment(state, current_confidence)
+            
+            yield f"\n- **Parameters**: `{json.dumps(params)}`"
+            
+            # Execute and Render
+            current_bytes = self.process_in_comfyui(current_bytes, params)
+            
+            # MOCK OCR STEP (We'll wire this to Kraken/Doctr next)
+            current_confidence += 0.3 
+            
+            state["history"].append({"pass": iteration, "params": params, "conf": current_confidence})
+            self.update_page_state(page_id, {"history": state["history"]})
 
-            if not any(category.get("active", False) for category in report.values()):
-                yield "- ✅ AI reports document is clean and requires no further adjustments! Ending loop.\n"
-                is_clean = True
-                break
+            # Render logic (Omitted for brevity)
+            yield f"\n- ✅ Pass {iteration} complete. Confidence: {current_confidence:.2f}"
 
-            yield "- ⚙️ Injecting parameters and routing through ComfyUI...\n"
-            
-            try:
-                result_img_bytes = self.process_in_comfyui(current_image, report)
-            except Exception as e:
-                yield f"\n❌ **Pipeline Error:** {str(e)}\n"
-                return
-                
-            current_image = base64.b64encode(result_img_bytes).decode('utf-8')
-            
-            yield "- ✅ ComfyUI processing complete. Rendering image...\n\n"
-            
-            # CRITICAL FIX: Chunk the massive base64 string so the server doesn't crash
-            markdown_img = f"![Processed Document](data:image/jpeg;base64,{current_image})\n"
-            chunk_size = 1024 * 64 # Yield in 64KB chunks
-            for i in range(0, len(markdown_img), chunk_size):
-                yield markdown_img[i:i+chunk_size]
-                time.sleep(0.05) # Give the network buffer time to flush
-            
-            yield "\n- Passing back to Vision Model for re-evaluation...\n"
+        yield f"\n\n🎉 **Done.** Archive: `{page_id}`"
 
-        if not is_clean:
-            yield f"\n⚠️ Reached maximum iterations ({self.valves.MAX_ITERATIONS}). Sending to human review.\n"
-
-        yield "\n🎉 **Restoration Complete.** Ready for OCR."
+    def _extract_image(self, messages):
+        for msg in reversed(messages):
+            if isinstance(msg.get("content"), list):
+                for item in msg["content"]:
+                    if item.get("type") == "image_url":
+                        url = item["image_url"]["url"]
+                        return url.split(",")[1] if "," in url else url
+        return None
