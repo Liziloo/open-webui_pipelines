@@ -110,7 +110,8 @@ class Pipeline:
             "model": self.valves.VISION_MODEL,
             "messages":[{"role": "user", "content": prompt, "images": [thumb_b64]}],
             "format": "json", 
-            "stream": False
+            "stream": False,
+            "keep_alive": 0 
         }
         
         res = requests.post(f"{self.valves.OLLAMA_URL}/api/chat", json=payload).json()
@@ -128,7 +129,8 @@ class Pipeline:
             "model": self.valves.TEXT_MODEL, 
             "messages":[{"role": "user", "content": prompt}], 
             "format": "json", 
-            "stream": False
+            "stream": False,
+            "keep_alive": 0
         }
         res = requests.post(f"{self.valves.OLLAMA_URL}/api/chat", json=payload).json()
         return json.loads(res["message"]["content"])
