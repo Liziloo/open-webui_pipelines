@@ -21,11 +21,11 @@ class Pipeline:
         OLLAMA_URL: str = "http://192.168.2.86:11434"
         COMFYUI_URL: str = "http://192.168.2.86:8188"
         ZONE_C_API_URL: str = "http://192.168.2.86:8000" # Where Kraken/Doctr endpoints live
-        VISION_MODEL: str = "llama3.2-vision:latest"
-        TEXT_MODEL: str = "llama3.1:8b"
+        VISION_MODEL: str = "qwen2.5vl:32b"
+        TEXT_MODEL: str = "glm-4.7-flash:q8_0"
         
         # Paths aligned with SPEC.md
-        WORKFLOW_JSON_PATH: str = "/app/backend/data/document_restoration_flow.json"
+        WORKFLOW_JSON_PATH: str = "/app/pipelines/historic_image_cleaner/document_restoration_flow.json"
         BATCH_JOB_PATH: str = "/app/pipelines/historic_image_cleaner/batch_job.json"
         BASE_DATA_DIR: str = "/mnt/data/projects"
         SESSION_DIR: str = "/app/pipelines/historic_image_cleaner/active_sessions"

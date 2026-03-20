@@ -67,7 +67,7 @@ _Files that need faster and more frequent access by the system get stored on SSD
 ├── pipelines/historic_image_cleaner
 │   ├── pipeline.log
 │   ├── comfy_workflows
-│   │   └── archival_ocr_prep.json
+│   │   └── document_restoration_flow.json
 │   ├── batch_job.json
 │   └── ops_catalog.json
 │   ├── active_sessions

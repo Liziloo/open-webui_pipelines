@@ -1,0 +1,90 @@
+{
+  "operations": {
+    "geometry_transform": {
+      "op_id": "transform",
+      "description": "Handles spatial corrections including margin padding, sub-degree deskewing, and resolution upscaling to normalize the document canvas for the OCR engine.",
+      "active_switch_node": "20",
+      "nodes": {
+        "pad": {
+          "node_id": "5",
+          "inputs": {
+            "left": { "type": "int", "range": [0, 1024], "step": 8 },
+            "top": { "type": "int", "range": [0, 1024], "step": 8 },
+            "right": { "type": "int", "range": [0, 1024], "step": 8 },
+            "bottom": { "type": "int", "range": [0, 1024], "step": 8 }
+          }
+        },
+        "rotate": {
+          "node_id": "29",
+          "inputs": {
+            "rotation_angle": { "type": "float", "range": [0.0, 359.9] }
+          }
+        },
+        "upscale": {
+          "node_id": "7",
+          "inputs": {
+            "upscale_method": {
+              "type": "string",
+              "options": [
+                "nearest-exact",
+                "bilinear",
+                "area",
+                "bicubic",
+                "lanczos"
+              ]
+            },
+            "scale_by": { "type": "float", "range": [0.01, 8.0] }
+          }
+        }
+      }
+    },
+    "frequency_separation": {
+      "op_id": "frequency",
+      "description": "Isolates high-frequency text elements from low-frequency background noise by calculating a background map and subtracting it from the source to neutralize stains and parchment texture.",
+      "active_switch_node": "21",
+      "nodes": {
+        "blur": {
+          "node_id": "3",
+          "inputs": {
+            "blur_radius": { "type": "int", "range": [1, 31] },
+            "sigma": { "type": "float", "range": [0.1, 10.0] }
+          }
+        },
+        "blending_mode": {
+          "node_id": "4",
+          "inputs": {
+            "blend_percentage": { "type": "float", "range": [0.0, 1.0] }
+          }
+        }
+      }
+    },
+    "noise_reduction": {
+      "op_id": "denoise",
+      "description": "Applies non-linear smoothing via median filtering to suppress salt-and-pepper artifacts and foxing while maintaining sharp character edges.",
+      "active_switch_node": "27",
+      "nodes": {
+        "median_filter": {
+          "node_id": "25",
+          "inputs": {
+            "diameter": { "type": "int", "range": [0, 255] },
+            "sigma_color": { "type": "float", "range": [-255.0, 255.0] },
+            "sigma_space": { "type": "float", "range": [-255.0, 255.0] }
+          }
+        }
+      }
+    },
+    "adaptive_threshold": {
+      "op_id": "threshold",
+      "description": "The final binarization stage; converts processed imagery into high-contrast 1-bit black and white data to maximize character recognition accuracy.",
+      "active_switch_node": "22",
+      "nodes": {
+        "threshold": {
+          "node_id": "2",
+          "inputs": {
+            "threshold": { "type": "float", "range": [0.0, 1.0] }
+          }
+        }
+      }
+    }
+  }
+}
