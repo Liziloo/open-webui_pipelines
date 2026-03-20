@@ -24,12 +24,16 @@ class Pipeline:
         VISION_MODEL: str = "qwen2.5vl:32b"
         TEXT_MODEL: str = "glm-4.7-flash:q8_0"
         
-        # Paths aligned with SPEC.md
-        WORKFLOW_JSON_PATH: str = "/app/pipelines/historic_image_cleaner/document_restoration_flow.json"
+        # Path Translation (Zone B vs Zone C)
+        LOCAL_DATA_DIR: str = "/data/projects"           # How the Docker container sees the drive
+        REMOTE_DATA_DIR: str = "/mnt/data/projects"      # How the GPU machine sees the drive
+
+        # Internal SSD Paths
+        WORKFLOW_JSON_PATH: str = "/app/backend/data/document_restoration_flow.json"
         BATCH_JOB_PATH: str = "/app/pipelines/historic_image_cleaner/batch_job.json"
-        BASE_DATA_DIR: str = "/mnt/data/projects"
         SESSION_DIR: str = "/app/pipelines/historic_image_cleaner/active_sessions"
         TEMP_DIR: str = "/app/pipelines/historic_image_cleaner/temp"
+        
 
     def __init__(self):
         self.valves = self.Valves()
@@ -62,10 +66,10 @@ class Pipeline:
     def generate_triage_artifacts(self, project_id: str, base64_image: str):
         page_id = self.generate_page_id(base64_image)
         
-        # HDD Paths (Zone B -> Zone C shared storage)
-        hdd_base = os.path.join(self.valves.BASE_DATA_DIR, project_id, "processed", "pages", page_id)
-        os.makedirs(hdd_base, exist_ok=True)
-        hdd_path = os.path.join(hdd_base, "original.tif")
+        # Local HDD Paths (Zone B writing)
+        hdd_base_local = os.path.join(self.valves.LOCAL_DATA_DIR, project_id, "processed", "pages", page_id)
+        os.makedirs(hdd_base_local, exist_ok=True)
+        hdd_path_local = os.path.join(hdd_base_local, "original.tif")
         
         # SSD Paths (Fast local temp storage)
         ocr_input_dir = os.path.join(self.valves.TEMP_DIR, "ocr_input")
@@ -73,16 +77,16 @@ class Pipeline:
         ssd_thumb_path = os.path.join(ocr_input_dir, f"{page_id}_triage_thumb.jpg")
 
         img_data = base64.b64decode(base64_image)
-        with open(hdd_path, "wb") as f:
-            f.write(img_data)
+        with open(hdd_path_local, "wb") as f:
+             f.write(img_data)
 
-        # Generate 1024px Thumbnail for Vision LLM (Saves context space!)
+        # Generate 1024px Thumbnail for Vision LLM
         with Image.open(io.BytesIO(img_data)) as img:
             img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
             if img.mode in ("RGBA", "P"): img = img.convert("RGB")
             img.save(ssd_thumb_path, "JPEG", quality=85)
         
-        return page_id, hdd_base, hdd_path, ssd_thumb_path
+        return page_id, hdd_base_local, hdd_path_local, ssd_thumb_path
 
     def update_page_state(self, page_id: str, updates: dict) -> dict:
         state_path = os.path.join(self.valves.SESSION_DIR, f"{page_id}_page_state.json")
@@ -135,10 +139,10 @@ class Pipeline:
         res = requests.post(f"{self.valves.OLLAMA_URL}/api/chat", json=payload).json()
         return json.loads(res["message"]["content"])
 
-    def get_ocr_metrics(self, image_path: str, iteration: int) -> float:
-        """Calls Zone C OCR endpoint. Falls back to mock metric if container is down."""
+    def get_ocr_metrics(self, remote_image_path: str, iteration: int) -> float:
+        """Calls Zone C OCR endpoint using the translated remote path."""
         try:
-            res = requests.post(f"{self.valves.ZONE_C_API_URL}/ocr_process", json={"image_path": image_path}, timeout=5)
+            res = requests.post(f"{self.valves.ZONE_C_API_URL}/ocr_process", json={"image_path": remote_image_path}, timeout=5)
             if res.status_code == 200:
                 return res.json().get("confidence_avg", 0.0)
         except Exception:
@@ -241,7 +245,7 @@ class Pipeline:
         original_bytes = base64.b64decode(base64_image)
 
         yield "👁️ **Pass 0: Initial Vision Triage...**\n"
-        page_id, hdd_base, hdd_path, thumb_path = self.generate_triage_artifacts(project_id, base64_image)
+        page_id, hdd_base_local, hdd_path_local, thumb_path = self.generate_triage_artifacts(project_id, base64_image)
         
         try:
             initial_policy = self.get_initial_triage(thumb_path)
@@ -249,9 +253,9 @@ class Pipeline:
             yield f"❌ Vision Triage Failed: {e}"; return
         
         state = self.update_page_state(page_id, {
-            "page_metadata": {"page_id": page_id, "project_id": project_id, "source_path": hdd_path},
-            "policy_notes": initial_policy,
-            "history":[]
+            "page_metadata": {"page_id": page_id, "project_id": project_id, "source_path": hdd_path_local},
+             "policy_notes": initial_policy,
+             "history":[]
         })
 
         current_confidence = 0.0
@@ -269,12 +273,14 @@ class Pipeline:
                 result_bytes = self.process_in_comfyui(page_id, iteration, original_bytes, params)
                 
                 # Save artifact to HDD
-                artifact_path = os.path.join(hdd_base, f"pass{iteration}_comfy.png")
-                with open(artifact_path, "wb") as f:
+                artifact_path_local = os.path.join(hdd_base_local, f"pass{iteration}_comfy.png")
+                with open(artifact_path_local, "wb") as f:
                     f.write(result_bytes)
+
+                artifact_path_remote = artifact_path_local.replace(self.valves.LOCAL_DATA_DIR, self.valves.REMOTE_DATA_DIR)
                 
                 # Get OCR Metrics
-                current_confidence = self.get_ocr_metrics(artifact_path, iteration)
+                current_confidence = self.get_ocr_metrics(artifact_path_remote, iteration)
                 
                 # Update State
                 state["history"].append({"pass": iteration, "params": params, "conf": current_confidence})
